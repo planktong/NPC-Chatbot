@@ -1,0 +1,875 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>医疗智能助手</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="vendor/fonts/google-fonts.css">
+    <link rel="stylesheet" href="vendor/css/all.min.css">
+    <script src="vendor/js/marked.min.js"></script>
+    <link rel="stylesheet" href="vendor/css/atom-one-light.min.css">
+    <script src="vendor/js/highlight.min.js"></script>
+    <script src="vendor/js/vue.global.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+</head>
+<body>
+    <div id="app">
+        <div class="app-lang-corner">
+            <select
+                class="lang-select"
+                :aria-label="t('lang_switch_aria')"
+                :value="locale"
+                @change="setLocale($event.target.value)"
+            >
+                <option value="zh">{{ t('lang_zh') }}</option>
+                <option value="en">{{ t('lang_en') }}</option>
+            </select>
+        </div>
+
+        <div class="app-wrapper">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="logo-icon" aria-hidden="true"><i class="fas fa-leaf"></i></div>
+                <h2>{{ t('brand_short') }}</h2>
+            </div>
+            <nav class="sidebar-nav">
+                <button @click="handleNewChat" :class="['nav-btn', {active: activeNav === 'newChat'}]">
+                    <i class="fas fa-plus"></i> {{ t('nav_new_chat') }}
+                </button>
+                <button @click="handleHistory" :class="['nav-btn', {active: activeNav === 'history'}]">
+                    <i class="fas fa-history"></i> {{ t('nav_history') }}
+                </button>
+                <button @click="handleSettings" :class="['nav-btn', {active: activeNav === 'settings'}]">
+                    <i class="fas fa-cog"></i> {{ t('nav_settings') }}
+                </button>
+                <button @click="handleProfile" :class="['nav-btn', {active: activeNav === 'profile'}]">
+                    <i class="fas fa-user-md"></i> {{ t('nav_profile') }}
+                </button>
+            </nav>
+            <div class="sidebar-footer">
+                <button @click="handleClearChat" class="danger-btn">
+                    <i class="fas fa-trash-alt"></i> {{ t('nav_clear_chat') }}
+                </button>
+            </div>
+        </aside>
+
+        <!-- Main Chat Area -->
+        <main class="main-content">
+            <!-- Settings Panel -->
+            <div v-if="activeNav === 'settings'" class="settings-panel">
+                <div class="settings-header">
+                    <h2><i class="fas fa-cog"></i> {{ t('settings_title') }}</h2>
+                    <p>{{ t('settings_intro') }}</p>
+                </div>
+                <div class="kb-tier-switch">
+                    <span class="kb-tier-switch-label">{{ t('kb_tier_label') }}</span>
+                    <label class="kb-tier-radio">
+                        <input type="radio" v-model="kbTier" value="brief" @change="loadDocuments">
+                        {{ t('kb_tier_brief') }}
+                    </label>
+                    <label class="kb-tier-radio">
+                        <input type="radio" v-model="kbTier" value="detailed" @change="loadDocuments">
+                        {{ t('kb_tier_detailed') }}
+                    </label>
+                </div>
+
+                <div class="upload-section">
+                    <h3><i class="fas fa-upload"></i> {{ t('upload_docs_title', { tier: kbTierLabel }) }}</h3>
+                    <div class="upload-area">
+                        <input 
+                            type="file" 
+                            ref="fileInput" 
+                            @change="handleFileSelect"
+                            accept=".pdf,.doc,.docx,.xls,.xlsx,.html,.htm"
+                            style="display: none"
+                        />
+                        <button @click="$refs.fileInput.click()" class="upload-btn">
+                            <i class="fas fa-cloud-upload-alt"></i> {{ t('choose_file') }}
+                        </button>
+                        <div v-if="selectedFile" class="selected-file">
+                            <i class="fas fa-file"></i> {{ selectedFile.name }}
+                            <button @click="uploadDocument" class="btn-primary" :disabled="isUploading">
+                                <i class="fas fa-upload"></i> {{ isUploading ? t('upload_ing') : t('upload_start') }}
+                            </button>
+                        </div>
+                        <div v-if="uploadProgress" class="upload-progress">
+                            {{ uploadProgress }}
+                        </div>
+                    </div>
+                </div>
+
+                <div class="documents-section">
+                    <h3><i class="fas fa-list"></i> {{ t('uploaded_list_title', { tier: kbTierLabel }) }}</h3>
+                    <button @click="loadDocuments" class="btn-secondary">
+                        <i class="fas fa-sync"></i> {{ t('refresh_list') }}
+                    </button>
+                    
+                    <div v-if="documentsLoading" class="loading-indicator">
+                        {{ t('loading') }}
+                    </div>
+                    
+                    <div v-else-if="documents.length === 0" class="empty-documents">
+                        <i class="fas fa-inbox"></i>
+                        <p>{{ t('no_docs_in_tier', { tier: kbTierLabel }) }}</p>
+                    </div>
+                    
+                    <div v-else class="documents-list">
+                        <div 
+                            v-for="doc in documents" 
+                            :key="doc.filename"
+                            class="document-item"
+                        >
+                            <div class="document-info">
+                                <div class="document-icon">
+                                    <i :class="getFileIcon(doc.file_type)"></i>
+                                </div>
+                                <div class="document-details">
+                                    <div class="document-name">{{ doc.filename }}</div>
+                                    <div class="document-meta">
+                                        <span>{{ doc.file_type }}</span>
+                                        <span>{{ doc.chunk_count }} {{ t('chunks_unit') }}</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <button 
+                                @click="deleteDocument(doc.filename, kbTier)" 
+                                class="btn-danger"
+                                :title="t('delete_doc_title')"
+                            >
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Profile Panel -->
+            <div v-if="activeNav === 'profile'" class="settings-panel">
+                <div class="settings-header">
+                    <h2><i class="fas fa-folder-open"></i> {{ t('profile_title') }}</h2>
+                    <p>{{ t('profile_intro') }}</p>
+                </div>
+
+                <div class="upload-section upload-section--medical">
+                    <h3><i class="fas fa-file-medical"></i> {{ t('upload_medical_title') }}</h3>
+                    <div class="upload-area">
+                        <input 
+                            type="file" 
+                            ref="profileInput" 
+                            @change="handleProfileSelect"
+                            accept=".pdf,.jpg,.jpeg,.png"
+                            style="display: none"
+                        />
+                        <div class="upload-buttons upload-buttons-row" v-if="userProfile && userProfile.records && userProfile.records.length > 0">
+                            <button @click="triggerProfileUpload" class="upload-btn upload-btn--medical">
+                                <i class="fas fa-plus-circle"></i> {{ t('upload_new_report') }}
+                            </button>
+                        </div>
+                        <button v-else @click="triggerProfileUpload" class="upload-btn upload-btn--medical">
+                            <i class="fas fa-camera"></i> {{ t('choose_image_pdf') }}
+                        </button>
+
+                        <div v-if="selectedProfileFile" class="selected-file selected-file--medical">
+                            <i class="fas fa-file-medical-alt"></i> {{ selectedProfileFile.name }}
+                            <button @click="uploadProfile" class="btn-primary btn-primary--medical" :disabled="isUploadingProfile">
+                                <i class="fas fa-upload"></i> {{ isUploadingProfile ? t('extract_ing') : t('extract_start') }}
+                            </button>
+                        </div>
+                        <div v-if="profileProgress" class="upload-progress">
+                            {{ profileProgress }}
+                        </div>
+                    </div>
+                </div>
+
+                <div class="upload-section upload-section--discharge discharge-upload-section">
+                    <h3><i class="fas fa-file-contract"></i> {{ t('discharge_title') }}</h3>
+                    <p class="discharge-upload-hint">{{ t('discharge_hint') }}</p>
+                    <div class="upload-area">
+                        <input
+                            type="file"
+                            ref="dischargeInput"
+                            @change="handleDischargeSelect"
+                            accept=".pdf,.jpg,.jpeg,.png"
+                            style="display: none"
+                        />
+                        <button type="button" @click="triggerDischargeUpload" class="upload-btn upload-btn--discharge">
+                            <i class="fas fa-file-upload"></i> {{ t('choose_discharge') }}
+                        </button>
+                        <div v-if="selectedDischargeFile" class="selected-file selected-file--discharge">
+                            <i class="fas fa-file-alt"></i> {{ selectedDischargeFile.name }}
+                            <button type="button" @click="uploadDischargeReport" class="btn-primary btn-primary--discharge" :disabled="isUploadingDischarge">
+                                <i class="fas fa-cloud-upload-alt"></i> {{ isUploadingDischarge ? t('discharge_parse_ing') : t('discharge_parse_start') }}
+                            </button>
+                        </div>
+                        <div v-if="dischargeProgress" class="upload-progress">{{ dischargeProgress }}</div>
+                    </div>
+                </div>
+
+                <div class="documents-section" v-if="userProfile && userProfile.records && userProfile.records.length > 0">
+                    <h3><i class="fas fa-clipboard-list"></i> {{ t('health_archive') }}</h3>
+                    <div class="profile-folder-filters">
+                        <label class="profile-filter-label">
+                            <span>{{ t('filter_order') }}</span>
+                            <select v-model="profileFilterOrder" @change="onProfileOrderChange" class="profile-filter-select" :disabled="!orderCategoryOptions.length">
+                                <option v-if="!orderCategoryOptions.length" value="">{{ t('filter_order_empty') }}</option>
+                                <option v-for="o in orderCategoryOptions" :key="o" :value="o">{{ o }}</option>
+                            </select>
+                        </label>
+                        <label class="profile-filter-label">
+                            <span>{{ t('filter_date') }}</span>
+                            <select v-model="profileFilterDate" class="profile-filter-select" :disabled="!reportDateOptionsForFilter.length">
+                                <option v-if="!reportDateOptionsForFilter.length" value="">{{ t('filter_date_dash') }}</option>
+                                <option v-for="d in reportDateOptionsForFilter" :key="d" :value="d">{{ d }}</option>
+                            </select>
+                        </label>
+                        <button
+                            v-if="activeMedicalRecord"
+                            type="button"
+                            class="btn-delete-record"
+                            :disabled="isDeletingMedicalRecord"
+                            @click="deleteActiveMedicalRecord"
+                        >
+                            <i class="fas fa-trash-alt"></i> {{ isDeletingMedicalRecord ? t('delete_record_ing') : t('delete_record') }}
+                        </button>
+                    </div>
+                    <div class="profile-card" v-if="activeMedicalRecord">
+                        <div class="profile-row"><span class="profile-label">{{ t('label_name') }}</span> <span class="profile-value">{{ userProfile.name || activeMedicalRecord.name || t('unknown') }}</span></div>
+                        <div class="profile-row"><span class="profile-label">{{ t('label_gender_age') }}</span> <span class="profile-value">{{ userProfile.gender || activeMedicalRecord.gender || t('unknown') }} / {{ userProfile.age || activeMedicalRecord.age || t('unknown') }}</span></div>
+                        <div class="profile-row"><span class="profile-label">{{ t('label_order_cat') }}</span> <span class="profile-value">{{ activeMedicalRecord.order_category || t('unknown') }}</span></div>
+                        <div class="profile-row"><span class="profile-label">{{ t('label_report_time') }}</span> <span class="profile-value">{{ activeMedicalRecord.report_date || t('unknown') }}</span></div>
+                        <div class="profile-row"><span class="profile-label">{{ t('label_diagnosis') }}</span> <span class="profile-value">{{ activeMedicalRecord.diagnosis || t('unknown') }} ({{ activeMedicalRecord.stage || t('unknown') }})</span></div>
+                        <div class="profile-row" v-if="activeMedicalRecord.medical_summary" style="flex-direction: column; gap: 8px;">
+                            <span class="profile-label"><i class="fas fa-brain"></i> {{ t('label_summary') }}</span>
+                            <span class="profile-value" style="background: rgba(63, 43, 150, 0.05); padding: 10px; border-radius: 8px; line-height: 1.5; font-size: 0.9rem;">
+                                {{ activeMedicalRecord.medical_summary }}
+                            </span>
+                        </div>
+                        
+                        <div class="profile-row" v-if="activeMedicalRecord.test_items && activeMedicalRecord.test_items.length > 0" style="flex-direction: column; border-bottom: none; gap: 15px; margin-top: 10px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+                                <span class="profile-label"><i class="fas fa-vials"></i> {{ t('label_tests') }}</span>
+                                <button class="btn-primary" style="background-color: #3f2b96; padding: 6px 12px; font-size: 0.85rem;" @click="showChartModal = true">
+                                    <i class="fas fa-chart-line"></i> {{ t('view_trend_chart') }}
+                                </button>
+                            </div>
+                            <div class="table-responsive">
+                                <table class="test-items-table">
+                                    <thead>
+                                        <tr>
+                                            <th>{{ t('th_test_time') }}</th>
+                                            <th>{{ t('th_item_name') }}</th>
+                                            <th>{{ t('th_result') }}</th>
+                                            <th>{{ t('th_unit') }}</th>
+                                            <th>{{ t('th_ref') }}</th>
+                                            <th>{{ t('th_abnormal') }}</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr v-for="(item, idx) in activeMedicalRecord.test_items" :key="idx">
+                                            <td>{{ item.record_date || t('unknown') }}</td>
+                                            <td class="item-name">{{ item.item_name }}</td>
+                                            <td :class="{'abnormal-val': item.abnormal && item.abnormal !== t('normal_status')}">{{ item.result }}</td>
+                                            <td>{{ item.unit }}</td>
+                                            <td>{{ item.reference_range }}</td>
+                                            <td :class="{'abnormal-text': item.abnormal && item.abnormal !== t('normal_status')}">{{ item.abnormal }}</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="documents-section follow-up-calendar-section" v-if="userProfile && userProfile.discharge_reports && userProfile.discharge_reports.length > 0">
+                    <h3><i class="fas fa-calendar-alt"></i> {{ t('follow_cal_title') }}</h3>
+                    <p class="calendar-hint">{{ t('follow_cal_hint') }}</p>
+                    <div class="follow-up-calendar-toolbar">
+                        <button type="button" class="btn-secondary calendar-nav-btn" @click="prevFollowUpMonth"><i class="fas fa-chevron-left"></i></button>
+                        <span class="calendar-month-label">{{ followUpMonthLabel }}</span>
+                        <button type="button" class="btn-secondary calendar-nav-btn" @click="nextFollowUpMonth"><i class="fas fa-chevron-right"></i></button>
+                    </div>
+                    <div class="follow-up-calendar-grid">
+                        <div class="cal-weekday" v-for="wd in calendarWeekdays" :key="wd">{{ wd }}</div>
+                        <template v-for="(week, wi) in followUpCalendarWeeks" :key="'wk'+wi">
+                            <div
+                                v-for="(cell, ci) in week"
+                                :key="'c'+wi+'-'+ci"
+                                class="cal-cell"
+                                :class="calCellDynamicClass(cell)"
+                                :role="cell.day && followUpEventsForDay(cell.day).length ? 'button' : null"
+                                :tabindex="cell.day && followUpEventsForDay(cell.day).length ? 0 : -1"
+                                @click="onFollowUpCalDayClick(cell, $event)"
+                                @keydown.enter.prevent="onFollowUpCalDayKeydown(cell, $event)"
+                            >
+                                <template v-if="cell.day">
+                                    <span class="cal-day-num">{{ cell.day }}</span>
+                                    <ul class="cal-day-events" v-if="followUpEventsForDay(cell.day).length">
+                                        <li
+                                            v-for="(ev, ei) in followUpEventsForDay(cell.day)"
+                                            :key="'e'+ei"
+                                            :title="ev.detail || ev.title"
+                                            :class="followUpEventJewelClass(ev)"
+                                        >
+                                            {{ ev.title }}
+                                        </li>
+                                    </ul>
+                                </template>
+                            </div>
+                        </template>
+                    </div>
+                    <!-- 挂到 body：避免祖先层 backdrop-filter 使 fixed 定位错位 -->
+                    <teleport to="body">
+                    <div
+                        v-if="followUpBubbleVisible"
+                        class="follow-up-cal-bubble-overlay"
+                        @click.self="closeFollowUpBubble"
+                    >
+                        <div
+                            class="follow-up-cal-bubble"
+                            :style="followUpBubbleBoxStyle"
+                            role="dialog"
+                            aria-modal="true"
+                            @click.stop
+                        >
+                            <button type="button" class="follow-up-cal-bubble-close" @click="closeFollowUpBubble" :aria-label="t('bubble_close')">
+                                <i class="fas fa-times"></i>
+                            </button>
+                            <div class="follow-up-cal-bubble-date">{{ followUpBubbleDateLabel }}</div>
+                            <ul class="follow-up-cal-bubble-list">
+                                <li v-for="(bev, bi) in followUpBubbleEvents" :key="'b'+bi">
+                                    <div class="follow-up-cal-bubble-title">{{ bev.title }}</div>
+                                    <div v-if="bev.detail" class="follow-up-cal-bubble-detail">{{ bev.detail }}</div>
+                                    <div v-if="bev.source" class="follow-up-cal-bubble-src">{{ t('bubble_source') }}{{ bev.source }}</div>
+                                </li>
+                            </ul>
+                        </div>
+                    </div>
+                    </teleport>
+                </div>
+
+                <div class="documents-section discharge-list-section" v-if="userProfile && userProfile.discharge_reports && userProfile.discharge_reports.length > 0">
+                    <h3><i class="fas fa-notes-medical"></i> {{ t('discharge_saved_title') }}</h3>
+                    <div class="discharge-report-cards">
+                        <div class="discharge-card" v-for="dr in [...userProfile.discharge_reports].reverse()" :key="dr.id">
+                            <div class="discharge-card-head">
+                                <span><i class="fas fa-hospital"></i> {{ dr.hospital_name || t('hospital_unknown') }} · {{ dr.report_date || t('date_tbd') }}</span>
+                                <button type="button" class="discharge-card-del" :disabled="isDeletingDischargeReport" @click="deleteDischargeReport(dr)">
+                                    <i class="fas fa-trash-alt"></i>
+                                </button>
+                            </div>
+                            <p class="discharge-card-meta">{{ dr.department || '' }} {{ dr.name ? '· ' + dr.name : '' }}</p>
+                            <div v-if="dr.discharge_orders_full_text" class="discharge-orders-block">
+                                <strong>{{ t('discharge_excerpt') }}</strong>
+                                <p class="discharge-orders-text">{{ dr.discharge_orders_full_text }}</p>
+                            </div>
+                            <div v-if="dr.follow_up_items && dr.follow_up_items.length" class="follow-up-table-wrap">
+                                <table class="follow-up-items-table">
+                                    <thead>
+                                        <tr><th>{{ t('fu_table_date') }}</th><th>{{ t('fu_table_item') }}</th><th>{{ t('fu_table_detail') }}</th></tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr v-for="(fi, fidx) in dr.follow_up_items" :key="fidx">
+                                            <td>{{ fi.visit_date || '—' }}</td>
+                                            <td>{{ fi.item_title || '—' }}</td>
+                                            <td>{{ fi.detail || '—' }}</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <p v-if="dr.parse_notes" class="parse-notes">{{ dr.parse_notes }}</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Chart Modal -->
+                <div v-if="showChartModal" class="chart-modal-overlay" @click.self="showChartModal = false">
+                    <div class="chart-modal-content">
+                        <div class="chart-modal-header">
+                            <h3><i class="fas fa-chart-line"></i> {{ t('chart_modal_title') }}</h3>
+                            <button @click="showChartModal = false" class="close-btn"><i class="fas fa-times"></i></button>
+                        </div>
+                        <p class="chart-modal-hint">{{ t('chart_modal_hint') }}</p>
+                        <div class="chart-controls" style="margin-bottom: 15px;">
+                            <label style="font-weight: 600; color: var(--text-color);">{{ t('chart_pick_indicator') }}</label>
+                            <select v-model="selectedChartIndicator" @change="renderChart" style="padding: 6px; border-radius: 6px; border: 1px solid #ccc; font-family: inherit;">
+                                <option v-for="name in uniqueTestItemNames" :key="name" :value="name">{{ name }}</option>
+                            </select>
+                        </div>
+                        <div class="chart-container" style="position: relative; height: 300px; width: 100%;">
+                            <canvas id="indicatorChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 解析完成：人工校对弹窗 -->
+                <div v-if="showProfileReviewModal && profileReviewDraft" class="profile-review-overlay">
+                    <div class="profile-review-modal" @click.stop>
+                        <div class="profile-review-header">
+                            <h3><i class="fas fa-clipboard-check"></i> {{ t('review_modal_title') }}</h3>
+                            <button type="button" class="close-btn" @click="closeProfileReviewModal" :disabled="isSavingProfileReview" :title="t('review_modal_close_title')"><i class="fas fa-times"></i></button>
+                        </div>
+                        <p class="profile-review-hint">{{ t('review_modal_hint') }}</p>
+                        <div class="profile-review-body">
+                            <label class="profile-review-label-inline">{{ t('review_order_label') }}
+                                <input type="text" v-model="profileReviewDraft.order_category" class="profile-review-input" :placeholder="t('review_order_ph')" />
+                            </label>
+                            <div class="profile-review-grid">
+                                <label>{{ t('review_name') }} <input type="text" v-model="profileReviewDraft.name" class="profile-review-input" /></label>
+                                <label>{{ t('review_age') }} <input type="text" v-model="profileReviewDraft.age" class="profile-review-input" /></label>
+                                <label>{{ t('review_gender') }} <input type="text" v-model="profileReviewDraft.gender" class="profile-review-input" /></label>
+                                <label>{{ t('review_report_date') }} <input type="text" v-model="profileReviewDraft.report_date" class="profile-review-input" :placeholder="t('review_report_ph')" /></label>
+                            </div>
+
+                            <div class="profile-review-section-title">
+                                <span><i class="fas fa-vials"></i> {{ t('review_tests_title') }}</span>
+                                <button type="button" class="btn-secondary profile-review-mini-btn" @click="addProfileReviewTestRow"><i class="fas fa-plus"></i> {{ t('review_add_row') }}</button>
+                            </div>
+                            <div class="profile-review-table-wrap">
+                                <table class="profile-review-table">
+                                    <thead>
+                                        <tr>
+                                            <th>{{ t('review_th_date') }}</th>
+                                            <th>{{ t('review_th_item') }}</th>
+                                            <th>{{ t('review_th_result') }}</th>
+                                            <th>{{ t('review_th_unit') }}</th>
+                                            <th>{{ t('review_th_ref') }}</th>
+                                            <th>{{ t('review_th_abn') }}</th>
+                                            <th></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr v-for="(row, ri) in profileReviewDraft.test_items" :key="'ti-'+ri">
+                                            <td><input type="text" v-model="row.record_date" class="profile-review-input table-input" /></td>
+                                            <td><input type="text" v-model="row.item_name" class="profile-review-input table-input" /></td>
+                                            <td><input type="text" v-model="row.result" class="profile-review-input table-input" /></td>
+                                            <td><input type="text" v-model="row.unit" class="profile-review-input table-input" /></td>
+                                            <td><input type="text" v-model="row.reference_range" class="profile-review-input table-input" /></td>
+                                            <td><input type="text" v-model="row.abnormal" class="profile-review-input table-input" /></td>
+                                            <td><button type="button" class="profile-review-remove" @click="removeProfileReviewTestRow(ri)" :title="t('review_remove_row')"><i class="fas fa-trash-alt"></i></button></td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <div class="profile-review-footer">
+                            <button type="button" class="btn-secondary" @click="closeProfileReviewModal" :disabled="isSavingProfileReview">{{ t('review_cancel') }}</button>
+                            <button type="button" class="btn-primary" style="background-color: #3f2b96;" @click="saveProfileReview" :disabled="isSavingProfileReview">
+                                <i class="fas fa-save"></i> {{ isSavingProfileReview ? t('review_save_ing') : t('review_save') }}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- History Sidebar -->
+            <div v-if="showHistorySidebar" class="history-sidebar">
+                <div class="history-header">
+                    <h3>{{ t('history_title') }}</h3>
+                    <button @click="showHistorySidebar = false" class="close-btn">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="history-list">
+                    <div v-if="sessions.length === 0" class="empty-history">
+                        <p>{{ t('history_empty') }}</p>
+                    </div>
+                    <div 
+                        v-for="session in sessions" 
+                        :key="session.session_id"
+                        class="history-item"
+                        :class="{active: session.session_id === sessionId}"
+                    >
+                        <div class="session-body" @click="loadSession(session.session_id)">
+                            <div class="session-info">
+                                <div class="session-title" :title="session.title || session.session_id">{{ session.title || session.session_id }}</div>
+                                <div class="session-meta">
+                                    <span>{{ session.message_count }} {{ t('msg_count') }}</span>
+                                    <span>{{ formatSessionTime(session.updated_at) }}</span>
+                                </div>
+                            </div>
+                        </div>
+                        <button 
+                            class="history-delete-btn"
+                            :title="t('delete_session_title')"
+                            @click.stop="deleteSession(session.session_id)"
+                        >
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- NCI Dictionary Modal：Teleport 到 body，避免 #app 内 overflow:hidden 裁剪 fixed 遮罩/iframe -->
+            <teleport to="body">
+                <div v-show="showDictionaryModal" class="chart-modal-overlay dictionary-modal-overlay" @click.self="closeDictionaryModal">
+                    <div class="chart-modal-content dictionary-modal-content-wide">
+                        <div class="chart-modal-header">
+                            <h3><i class="fas fa-spell-check"></i> {{ t('dict_title') }}</h3>
+                            <button type="button" @click="closeDictionaryModal" class="close-btn"><i class="fas fa-times"></i></button>
+                        </div>
+                        <p style="font-size: 0.8rem; color: #888; margin-bottom: 10px;">
+                            {{ t('dict_intro') }}
+                            <a href="https://www.cancer.gov/publications/dictionaries/cancer-terms" target="_blank" rel="noopener noreferrer">{{ t('dict_open_nci') }}</a>
+                        </p>
+                        <div class="nci-dictionary-panel">
+                            <div class="nci-dictionary-search-row">
+                                <input
+                                    type="text"
+                                    v-model="nciDictionaryQuery"
+                                    class="nci-dictionary-input"
+                                    :placeholder="t('dict_placeholder')"
+                                    autocomplete="off"
+                                    @keydown.enter.prevent="runNciDictionarySearch"
+                                />
+                                <button type="button" class="nci-dictionary-search-btn" :disabled="nciDictionaryLoading" @click="runNciDictionarySearch">
+                                    <i class="fas fa-search"></i> {{ t('dict_search') }}
+                                </button>
+                            </div>
+                            <div class="nci-dictionary-match-row">
+                                <span class="nci-dictionary-match-label">{{ t('dict_match_label') }}</span>
+                                <label class="nci-dictionary-match-opt"><input type="radio" v-model="nciDictionaryMatchType" value="Begins"> {{ t('dict_match_begins') }}</label>
+                                <label class="nci-dictionary-match-opt"><input type="radio" v-model="nciDictionaryMatchType" value="Contains"> {{ t('dict_match_contains') }}</label>
+                            </div>
+                            <p v-if="nciDictionaryError" class="nci-dictionary-error">{{ nciDictionaryError }}</p>
+                            <p v-if="nciDictionaryLoading" class="nci-dictionary-loading"><i class="fas fa-spinner fa-spin"></i> {{ t('dict_search_ing') }}</p>
+                            <template v-else-if="nciDictionaryResults.length">
+                                <p class="nci-dictionary-meta">{{ t('dict_meta', { total: nciDictionaryTotal, n: nciDictionaryResults.length }) }}</p>
+                                <div class="nci-dictionary-results">
+                                    <div v-for="item in nciDictionaryResults" :key="item.termId" class="nci-dictionary-item">
+                                        <div class="nci-dictionary-term-title">{{ item.termName }}</div>
+                                        <p v-if="item.pronunciation && item.pronunciation.key" class="nci-dictionary-pron">{{ item.pronunciation.key }}</p>
+                                        <p class="nci-dictionary-def">{{ item.definition && item.definition.text }}</p>
+                                        <a
+                                            v-if="item.prettyUrlName"
+                                            class="nci-dictionary-link"
+                                            :href="'https://www.cancer.gov/publications/dictionaries/cancer-terms/def/' + item.prettyUrlName"
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                        >{{ t('dict_view_full') }} <i class="fas fa-external-link-alt"></i></a>
+                                    </div>
+                                </div>
+                            </template>
+                            <p v-else-if="nciDictionarySearched" class="nci-dictionary-empty">{{ t('dict_no_results') }}</p>
+                        </div>
+                    </div>
+                </div>
+            </teleport>
+
+            <!-- Chat Area (hidden when settings or profile is active) -->
+            <div v-show="activeNav === 'newChat' || activeNav === 'history'" class="chat-area">
+                <header class="chat-header">
+                    <div class="header-info">
+                        <div class="status-dot"></div>
+                        <span>{{ t('status_online') }}</span>
+                    </div>
+                    <div class="header-actions" style="display: flex; gap: 15px; align-items: center;">
+                        <div class="think-mode-selector">
+                            <span class="mode-label">{{ t('think_mode_label') }}</span>
+                            <label class="mode-radio" :title="thinkModeHints.fast"><input type="radio" v-model="thinkMode" value="fast"> {{ t('think_fast') }} </label>
+                            <label class="mode-radio" :title="thinkModeHints.normal"><input type="radio" v-model="thinkMode" value="normal"> {{ t('think_normal') }} </label>
+                            <label class="mode-radio" :title="thinkModeHints.deep"><input type="radio" v-model="thinkMode" value="deep"> {{ t('think_deep') }} </label>
+                            <span class="think-mode-help" aria-hidden="true">
+                                <i class="fas fa-info-circle"></i>
+                                <div class="think-mode-hover-card">
+                                    <div class="think-mode-hover-line">{{ t('think_hover_fast') }}</div>
+                                    <div class="think-mode-hover-line">{{ t('think_hover_normal') }}</div>
+                                    <div class="think-mode-hover-line">{{ t('think_hover_deep') }}</div>
+                                </div>
+                            </span>
+                        </div>
+                        <button class="icon-btn" :title="t('more_btn')"><i class="fas fa-ellipsis-h"></i></button>
+                    </div>
+                </header>
+
+                <div class="chat-container" ref="chatContainer">
+                <div v-if="messages.length === 0" class="welcome-screen">
+                    <div class="big-avatar" aria-hidden="true"><i class="fas fa-seedling"></i></div>
+                    <h3>{{ t('welcome_title') }}</h3>
+                    <p style="color: var(--text-light); font-size: 0.95rem; margin-bottom: 20px;">{{ t('welcome_body') }}</p>
+                </div>
+                
+                <!-- Messages -->
+                <div v-for="(msg, index) in messages" :key="index" :class="['message', msg.isUser ? 'user-message' : 'bot-message']">
+                    <!-- 思考动画（在气泡内部，RAG 步骤实时填入） -->
+                    <div v-if="!msg.isUser && msg.isThinking && !msg.text" class="message-content thinking-content">
+                        <div class="thinking-header">
+                            <div class="thinking-dots">
+                                <span class="tdot"></span>
+                                <span class="tdot"></span>
+                                <span class="tdot"></span>
+                            </div>
+                            <span v-if="!msg.ragSteps || !msg.ragSteps.length" class="thinking-text">{{ t('thinking_default') }}</span>
+                            <span v-else class="thinking-text">{{ msg.ragSteps[msg.ragSteps.length - 1].label }}</span>
+                        </div>
+                        <div v-if="msg.ragSteps && msg.ragSteps.length" class="thinking-trace-lines">
+                            <div v-for="(step, sIdx) in msg.ragSteps" :key="sIdx" class="thinking-trace-line">
+                                <span class="thinking-trace-icon">{{ step.icon || '▶' }}</span>
+                                <span class="thinking-trace-label">{{ step.label }}</span>
+                                <span v-if="step.detail" class="thinking-trace-detail">{{ step.detail }}</span>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- 正常回复内容 -->
+                    <div v-else class="message-content">
+                        <div v-html="msg.isUser ? escapeHtml(msg.text) : parseMarkdown(msg.text, index)"></div>
+                        
+                        <!-- 参考文献区 -->
+                        <div v-if="!msg.isUser && msg.ragTrace && msg.ragTrace.retrieved_chunks && msg.ragTrace.retrieved_chunks.length > 0" class="references-section">
+                            <details class="references-details">
+                                <summary class="references-title"><i class="fas fa-book"></i> {{ t('references') }}</summary>
+                                <ul class="sources-list" style="margin-top: 10px;">
+                                    <li v-for="(chunk, cIdx) in msg.ragTrace.retrieved_chunks" :key="cIdx" class="source-item" :id="'chunk-' + index + '-' + (cIdx + 1)">
+                                        <div class="source-title-line">
+                                            <span class="ref-index cite-ref" :data-msg-index="index" :data-chunk-index="cIdx + 1">[{{ cIdx + 1 }}]</span>
+                                            <span class="source-type-icon" aria-hidden="true">
+                                                <i v-if="referenceSourceDisplay(chunk).hasMetaJson" class="fas fa-table" style="color: #217346;"></i>
+                                                <i v-else-if="chunk.filename && chunk.filename.includes('Graph')" class="fas fa-project-diagram" style="color: #9b59b6;"></i>
+                                                <i v-else class="fas fa-file-pdf" style="color: #e74c3c;"></i>
+                                            </span>
+                                            <span v-if="chunk.page_number && chunk.page_number !== 'Graph'" class="source-page">{{ t('source_page', { n: chunk.page_number }) }}</span>
+                                        </div>
+                                        <div v-if="referenceSourceDisplay(chunk).show" class="source-literature-meta" :class="{ 'source-literature-meta--filename': !referenceSourceDisplay(chunk).hasMetaJson }">
+                                            <div v-if="referenceSourceDisplay(chunk).headline" class="ref-lit-title">{{ referenceSourceDisplay(chunk).headline }}</div>
+                                            <div v-if="referenceSourceDisplay(chunk).date" class="ref-lit-line">
+                                                <span class="ref-lit-label">{{ t('ref_lit_date') }}</span>
+                                                <span>{{ referenceSourceDisplay(chunk).date }}</span>
+                                            </div>
+                                            <div v-if="referenceSourceDisplay(chunk).journal" class="ref-lit-line">
+                                                <span class="ref-lit-label">{{ t('ref_lit_journal') }}</span>
+                                                <span>{{ referenceSourceDisplay(chunk).journal }}</span>
+                                            </div>
+                                            <div v-if="referenceSourceDisplay(chunk).category" class="ref-lit-line">
+                                                <span class="ref-lit-label">{{ t('ref_lit_category') }}</span>
+                                                <span>{{ referenceSourceDisplay(chunk).category }}</span>
+                                            </div>
+                                            <div v-if="referenceSourceDisplay(chunk).linkUrl" class="ref-lit-line ref-lit-link-wrap">
+                                                <a :href="referenceSourceDisplay(chunk).linkUrl" target="_blank" rel="noopener noreferrer" class="ref-lit-link">{{ t('ref_lit_link') }}</a>
+                                            </div>
+                                        </div>
+                                        <div class="source-meta-line">
+                                            <span class="source-page">{{ t('rrf_rank', { n: chunk.rrf_rank || (cIdx + 1) }) }}</span>
+                                            <span v-if="chunk.rerank_score !== null && chunk.rerank_score !== undefined" class="source-page">{{ t('rerank_score', { s: Number(chunk.rerank_score).toFixed(4) }) }}</span>
+                                        </div>
+                                        <div v-if="chunk.text" class="source-excerpt">{{ chunk.text }}</div>
+                                    </li>
+                                </ul>
+                            </details>
+                        </div>
+                    </div>
+
+                        <!-- 知识图谱检索：实体 + 子图可视化 + 文本预览 -->
+                        <div v-if="!msg.isUser && msg.ragTrace && (msg.ragTrace.graph_kb_applied || msg.ragTrace.graph_entities || msg.ragTrace.graph_subgraph)" class="kg-rag-section">
+                            <details class="kg-rag-details" open>
+                                <summary class="kg-rag-title"><i class="fas fa-project-diagram"></i> {{ t('kg_title') }}</summary>
+                                <div class="kg-rag-body">
+                                    <div v-if="msg.ragTrace.graph_entities" class="kg-entity-tags">
+                                        <span v-if="msg.ragTrace.graph_entities.diseases && msg.ragTrace.graph_entities.diseases.length" class="kg-tag kg-tag-disease">
+                                            {{ t('kg_disease') }}{{ msg.ragTrace.graph_entities.diseases.join(locale === 'en' ? ', ' : '、') }}
+                                        </span>
+                                        <span v-if="msg.ragTrace.graph_entities.drugs && msg.ragTrace.graph_entities.drugs.length" class="kg-tag kg-tag-drug">
+                                            {{ t('kg_drug') }}{{ msg.ragTrace.graph_entities.drugs.join(locale === 'en' ? ', ' : '、') }}
+                                        </span>
+                                        <span v-if="msg.ragTrace.graph_entities.genes && msg.ragTrace.graph_entities.genes.length" class="kg-tag kg-tag-gene">
+                                            {{ t('kg_gene') }}{{ msg.ragTrace.graph_entities.genes.join(locale === 'en' ? ', ' : '、') }}
+                                        </span>
+                                    </div>
+                                    <div v-if="msg.ragTrace.graph_error" class="kg-error">{{ t('kg_neo4j') }}{{ msg.ragTrace.graph_error }}</div>
+                                    <div
+                                        v-if="msg.ragTrace.graph_subgraph && msg.ragTrace.graph_subgraph.nodes && msg.ragTrace.graph_subgraph.nodes.length"
+                                        class="kg-network-canvas"
+                                        :id="'kg-net-' + index"
+                                    ></div>
+                                    <details v-if="msg.ragTrace.graph_context_preview" class="kg-preview-details">
+                                        <summary>{{ t('kg_preview_summary') }}</summary>
+                                        <pre class="kg-preview-pre">{{ msg.ragTrace.graph_context_preview }}</pre>
+                                    </details>
+                                </div>
+                            </details>
+                        </div>
+
+                    <div v-if="!msg.isUser && msg.ragTrace" class="message-meta">
+                        <details class="reasoning-details">
+                            <summary>{{ t('trace_title') }}</summary>
+                            <div class="reasoning-content">
+                                <div class="trace-line">
+                                    {{ t('trace_tool') }}{{ msg.ragTrace.tool_used ? msg.ragTrace.tool_name : t('trace_tool_unused') }}
+                                </div>
+                                <div v-if="msg.ragTrace.retrieval_stage" class="trace-line">
+                                    {{ t('trace_stage') }}{{ msg.ragTrace.retrieval_stage }}
+                                </div>
+                                <div v-if="msg.ragTrace.grade_score" class="trace-line">
+                                    {{ t('trace_grade') }}{{ msg.ragTrace.grade_score }}
+                                </div>
+                                <div v-if="msg.ragTrace.grade_route" class="trace-line">
+                                    {{ t('trace_route') }}{{ msg.ragTrace.grade_route }}
+                                </div>
+                                <div v-if="msg.ragTrace.rewrite_needed !== null && msg.ragTrace.rewrite_needed !== undefined" class="trace-line">
+                                    {{ t('trace_rewrite_q') }}{{ msg.ragTrace.rewrite_needed ? t('trace_yes') : t('trace_no') }}
+                                </div>
+                                <div v-if="msg.ragTrace.rewrite_strategy" class="trace-line">
+                                    {{ t('trace_rewrite_strategy') }}{{ msg.ragTrace.rewrite_strategy }}
+                                </div>
+                                <div v-if="msg.ragTrace.rewrite_query" class="trace-line">
+                                    {{ t('trace_rewrite_query') }}{{ msg.ragTrace.rewrite_query }}
+                                </div>
+                                <div v-if="msg.ragTrace.retrieval_mode" class="trace-line">
+                                    {{ t('trace_mode') }}{{ msg.ragTrace.retrieval_mode }}
+                                </div>
+                                <div v-if="msg.ragTrace.kb_tier" class="trace-line">
+                                    {{ t('trace_kb_tier') }}{{ msg.ragTrace.kb_tier === 'detailed' ? t('kb_detailed_name') : t('kb_brief_name') }}
+                                </div>
+                                <div v-if="msg.ragTrace.dense_count !== null && msg.ragTrace.dense_count !== undefined" class="trace-line">
+                                    {{ t('trace_dense') }}{{ msg.ragTrace.dense_count }}
+                                </div>
+                                <div v-if="msg.ragTrace.sparse_count !== null && msg.ragTrace.sparse_count !== undefined" class="trace-line">
+                                    {{ t('trace_sparse') }}{{ msg.ragTrace.sparse_count }}
+                                </div>
+                                <div v-if="msg.ragTrace.graph_count !== null && msg.ragTrace.graph_count !== undefined" class="trace-line">
+                                    {{ t('trace_graph') }}{{ msg.ragTrace.graph_count }}
+                                </div>
+                                <div v-if="msg.ragTrace.candidate_k" class="trace-line">
+                                    {{ t('trace_candidates') }}{{ msg.ragTrace.candidate_k }}
+                                </div>
+                                <div v-if="msg.ragTrace.leaf_retrieve_level" class="trace-line">
+                                    {{ t('trace_leaf') }}L{{ msg.ragTrace.leaf_retrieve_level }}
+                                </div>
+                                <div v-if="msg.ragTrace.auto_merge_enabled !== null && msg.ragTrace.auto_merge_enabled !== undefined" class="trace-line">
+                                    {{ t('trace_auto_merge_on') }}{{ msg.ragTrace.auto_merge_enabled ? t('trace_yes') : t('trace_no') }}
+                                </div>
+                                <div v-if="msg.ragTrace.auto_merge_applied !== null && msg.ragTrace.auto_merge_applied !== undefined" class="trace-line">
+                                    {{ t('trace_auto_merge_applied') }}{{ msg.ragTrace.auto_merge_applied ? t('trace_yes') : t('trace_no') }}
+                                </div>
+                                <div v-if="msg.ragTrace.auto_merge_threshold" class="trace-line">
+                                    {{ t('trace_merge_threshold') }}{{ msg.ragTrace.auto_merge_threshold }}
+                                </div>
+                                <div v-if="msg.ragTrace.auto_merge_replaced_chunks" class="trace-line">
+                                    {{ t('trace_merge_replaced') }}{{ msg.ragTrace.auto_merge_replaced_chunks }}
+                                </div>
+                                <div v-if="msg.ragTrace.auto_merge_steps" class="trace-line">
+                                    {{ t('trace_merge_steps') }}{{ msg.ragTrace.auto_merge_steps }}
+                                </div>
+                                <div v-if="msg.ragTrace.rerank_enabled !== null && msg.ragTrace.rerank_enabled !== undefined" class="trace-line">
+                                    {{ t('trace_rerank_cfg') }}{{ msg.ragTrace.rerank_enabled ? t('trace_yes') : t('trace_no') }}
+                                </div>
+                                <div v-if="msg.ragTrace.rerank_applied !== null && msg.ragTrace.rerank_applied !== undefined" class="trace-line">
+                                    {{ t('trace_rerank_done') }}{{ msg.ragTrace.rerank_applied ? t('trace_yes') : t('trace_no') }}
+                                </div>
+                                <div v-if="msg.ragTrace.rerank_model" class="trace-line">
+                                    {{ t('trace_rerank_model') }}{{ msg.ragTrace.rerank_model }}
+                                </div>
+                                <div v-if="msg.ragTrace.rerank_error" class="trace-line">
+                                    {{ t('trace_rerank_err') }}{{ msg.ragTrace.rerank_error }}
+                                </div>
+                                <div v-if="msg.ragTrace.expansion_type" class="trace-line">
+                                    {{ t('trace_expansion') }}{{ msg.ragTrace.expansion_type }}
+                                </div>
+                                <div v-if="msg.ragTrace.step_back_question" class="trace-line">
+                                    {{ t('trace_step_back') }}{{ msg.ragTrace.step_back_question }}
+                                </div>
+                                <div v-if="msg.ragTrace.expanded_query" class="trace-line">
+                                    {{ t('trace_expanded_q') }}{{ msg.ragTrace.expanded_query }}
+                                </div>
+                                <div v-if="msg.ragTrace.hypothetical_doc" class="trace-line">
+                                    {{ t('trace_hyde') }}{{ msg.ragTrace.hypothetical_doc }}
+                                </div>
+                            </div>
+                        </details>
+                    </div>
+
+                    <!-- 猜你想问（追问区） -->
+                    <div v-if="!msg.isUser && msg.followUps && msg.followUps.length > 0" class="follow-ups-wrapper">
+                        <div class="follow-ups-title">{{ t('follow_ups_title') }}</div>
+                        <div class="follow-ups-list">
+                            <button v-for="(q, qIdx) in msg.followUps" :key="qIdx" class="follow-up-btn" @click="sendFollowUp(q)">
+                                {{ q }}
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- 操作按钮与免责申明 -->
+                    <div v-if="!msg.isUser && msg.isComplete && msg.text" class="message-actions-wrapper">
+                        <div class="message-actions">
+                            <button class="action-btn" :title="t('action_copy')" @click="copyText(msg.text, $event)"><i class="far fa-copy"></i></button>
+                            <button class="action-btn" :title="t('action_fav')" @click="toggleAction($event)"><i class="far fa-star"></i></button>
+                            <button class="action-btn" :title="t('action_share')" @click="toggleAction($event, 'share')"><i class="fas fa-share-alt"></i></button>
+                            <button class="action-btn" :title="t('action_up')" @click="toggleAction($event, 'up')"><i class="far fa-thumbs-up"></i></button>
+                            <button class="action-btn" :title="t('action_down')" @click="toggleAction($event, 'down')"><i class="far fa-thumbs-down"></i></button>
+                        </div>
+                        <div class="message-disclaimer">
+                            {{ t('disclaimer') }}
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Loading Indicator -->
+            </div>
+
+            <div class="input-area-wrapper">
+                <div v-if="optimizedQuestions && optimizedQuestions.length > 0" class="optimized-questions-popup">
+                    <div class="optimized-header">
+                        <span>{{ t('opt_popup_title') }}</span>
+                        <button @click="optimizedQuestions = []" class="close-btn" :title="t('opt_close')"><i class="fas fa-times"></i></button>
+                    </div>
+                    <ul class="optimized-list">
+                        <li v-for="(q, idx) in optimizedQuestions" :key="idx">
+                            <a href="#" @click.prevent="applyOptimizedQuestion(q)">{{ q }}</a>
+                        </li>
+                    </ul>
+                </div>
+                <div class="preset-functions-wrapper">
+                    <span class="preset-func-label">{{ t('preset_label') }}</span>
+                    <button class="preset-tag-small" @click="sendFollowUp(t('preset_q_guide'))"><i class="fas fa-book-medical"></i> {{ t('preset_guide') }}</button>
+                    <button class="preset-tag-small" @click="sendFollowUp(t('preset_q_report'))"><i class="fas fa-microscope"></i> {{ t('preset_report') }}</button>
+                    <button type="button" class="preset-tag-small" @click="openDictionaryModal" style="background-color: #fcf3cf; color: #f39c12; border-color: rgba(243, 156, 18, 0.2);"><i class="fas fa-spell-check"></i> {{ t('preset_dict') }}</button>
+                    <button class="preset-tag-small highlight-btn" @click="handleOptimize" :disabled="!userInput.trim() || isOptimizing">
+                        <i class="fas fa-magic" :class="{'fa-spin': isOptimizing}"></i> {{ isOptimizing ? t('preset_optimize_ing') : t('preset_optimize') }}
+                    </button>
+                </div>
+                <div class="input-area">
+                    <button class="attach-btn"><i class="fas fa-paperclip"></i></button>
+                    <textarea 
+                        v-model="userInput" 
+                        @keydown="handleKeyDown"
+                        @compositionstart="handleCompositionStart"
+                        @compositionend="handleCompositionEnd"
+                        @input="autoResize"
+                        :placeholder="t('input_placeholder')" 
+                        rows="1"
+                        ref="textarea"
+                    ></textarea>
+                    <button v-if="isLoading" @click="handleStop" class="send-btn stop-btn" :title="t('send_stop')">
+                        <i class="fas fa-stop"></i>
+                    </button>
+                    <button v-else @click="handleSend" class="send-btn" :title="t('send_go')">
+                        <i class="fas fa-paper-plane"></i>
+                    </button>
+                </div>
+                <div class="footer-text">{{ t('footer_ai_note') }}</div>
+            </div>
+            </div>
+            <!-- End of Chat Area -->
+            
+            <!-- 挂到 body：避免祖先 backdrop-filter 导致 fixed 与 getBoundingClientRect 不一致 -->
+            <teleport to="body">
+                <div
+                    id="global-tooltip"
+                    class="tooltip-bubble"
+                    ref="globalTooltip"
+                    v-show="showTooltip"
+                    :style="{ left: tooltipX + 'px', top: tooltipY + 'px' }"
+                >
+                    <div class="tooltip-content">{{ tooltipText }}</div>
+                    <div class="tooltip-arrow"></div>
+                </div>
+            </teleport>
+        </main>
+        </div>
+    </div>
+
+    <script src="i18n.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>
