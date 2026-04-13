@@ -64,7 +64,7 @@ NPC-Chatbot is designed to simulate realistic, knowledge-grounded conversations 
 │  Hybrid RAG   │ │       EHR Data Layer         │
 │  Retriever    │ │  • Patient records           │
 │  • Dense (vec)│ │  • Vitals / Labs             │
-│  • Sparse(BM25│ │  • Medications / Notes       │
+│  • Sparse(BM25)│ │  • Medications / Notes       │
 └───────┬───────┘ └──────────────┬───────────────┘
         │                        │
         └──────────┬─────────────┘
